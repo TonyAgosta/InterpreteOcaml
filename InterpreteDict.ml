@@ -30,7 +30,7 @@ type exp =
   | Iterate of exp * exp
   | Fold of exp * exp
   | Filter of ide list * exp
-  and mydictionary= Empty| Pair of ide * exp * mydictionary;;
+  and mydictionary= Empty| Pair of ide * exp* mydictionary;;
 
 (*ambiente polimorfo*)
 type 't env = ide -> 't;;
@@ -47,8 +47,9 @@ type evT =
   | FunVal of evFun 
   | RecFunVal of ide * evFun
   | MyFunVal of ide * ide * exp * evT env
-  | Dictval of (ide * evT) list
-and evFun = ide * exp * evT env
+  | Dictval of edictval
+  and edictval= Empty1 |Item of (ide * evT) * edictval
+  and evFun = ide * exp * evT env
 
 
 (*rts*)
@@ -126,9 +127,14 @@ let non x = if (typecheck "bool" x)
 (*Funzione ricorsiva utilizzato per vedere se una chiave é presente nel dizionario*)
 let rec isPresent value diz=
   (match diz with
-  |[]-> false
-  |(k1,v)::ds-> if (value=k1) then true else isPresent value ds
+  |Dictval(Empty1)-> false
+  |Dictval(Item((k,v),d))-> if (value=k) then true else isPresent value (Dictval(d))
+  |_-> failwith("error isPresent")
   );;
+
+(*Funzione che inserisce una coppia chiave-valore nel dizioario*)
+let insert key value diz=
+  Item((key,value),diz);;
 
 (*Funzione ricorsiva utilizzata per vedere se un elemento é presente all'interno di una lista*)
 let rec isPresent1 value diz=
@@ -140,16 +146,17 @@ let rec isPresent1 value diz=
 (*Funzione ricorsiva utilizzata per rimuovere dal dizionario la coppia chiave-valore identificata da "value"*)
 let rec removeKey value diz=
   (match diz with
-  |[]->[]
-  |(k1,v)::ds -> if (value=k1) then ds else (k1,v)::removeKey value ds
+  |Item((k1,v1),d) -> if (value=k1) then d else Item((k1,v1),removeKey value d)
+  |_-> failwith("error removeKey")
   );;
 
 (*Funzione ricorsiva utilizzata per ottenere il dizionario senza le coppie chiave volore identificate dalla lista di chiavi passata come argomento*)
+
 let rec recFilter listkey diz=
   (match diz with
-  []->[]
-  |(k1,v)::ds-> if (isPresent1 k1 listkey) then recFilter listkey ds
-                else (k1,v)::(recFilter listkey ds)  
+  |Item((k1,v1),d) -> if (isPresent1 k1 listkey) then recFilter listkey d
+                else Item((k1,v1),recFilter listkey d)
+  |Empty1->Empty1
   );;
 
 (*interprete*)
@@ -205,12 +212,11 @@ let rec eval (e : exp) (r : evT env) : evT = match e with
   Dict(d)-> Dictval(evalMydictionary d r)|
   
   Insert(k, s, d) -> 
-    (match eval d r with
-    |Dictval(dict) -> if(isPresent k dict) then failwith("chiave gia presente")
-                      else (match dict with
-                      | [] -> Dictval((k,(eval s r))::dict)
-                      | (k1,v)::ds -> Dictval((k,(eval s r))::dict)
-                      )
+    let v = eval d r in 
+      let v1=eval s r in
+    (match v with
+    |Dictval(dict) -> if(isPresent k (Dictval(dict))) then failwith("chiave gia presente")
+                      else Dictval(insert k v1 dict)
     |_-> failwith("Error insert") 
     ) |
   Delete(d,k) ->
@@ -220,20 +226,23 @@ let rec eval (e : exp) (r : evT env) : evT = match e with
     ) |
   Has_key(k,d) -> 
     (match eval d r with
-    |Dictval(dict)-> if(isPresent k dict) then Bool(true)
+    |Dictval(dict)-> if(isPresent k (Dictval(dict))) then Bool(true)
                       else Bool(false)
     |_ -> failwith("error has_key")
     ) |
   Filter(kl,d) ->
-    (match eval d r with
+    let v= eval d r in
+    (match v with
     |Dictval(dict)-> Dictval(recFilter kl dict)
     |_ -> failwith("error filter")
     ) |
   Iterate(f,d) ->
-    (match d with
-    |Dict dict ->Dictval(iterate dict r f)
-    |_-> failwith("error in Iterate")
-    ) |
+      let fclosure=(eval f r) in
+      (match(eval d r) with
+      Dictval(dict)-> Dictval(iterate dict r fclosure)
+      |_-> failwith("errore match iterate")
+      ) 
+  |
   Fold(f,d)->
     (match eval d r with
     |Dictval(dict) -> (match f with
@@ -247,20 +256,21 @@ let rec eval (e : exp) (r : evT env) : evT = match e with
                       |_-> failwith("errore match Fold"))
     |_->failwith ("error fold")
     )
-  and evalMydictionary (dict: mydictionary)(r: evT env)=
+  and evalMydictionary (dict: mydictionary)(r: evT env) : edictval=
                           (match dict with
-                          |Empty->[]
-                          |Pair(k,v,d)-> (k,eval v r):: evalMydictionary d r)
+                          |Empty->Empty1
+                          |Pair(k,v,d)-> Item((k,eval v r),evalMydictionary d r)
+                          )
  
-  and iterate (dict : mydictionary)(r1: evT env)(funct:exp) =
-                (match dict with
-                | Empty->[]
-                | Pair(k,v,d)-> (k,eval (FunCall (funct ,v)) r1)::(iterate d r1 funct)
+  and iterate (dict:edictval)(r1: evT env)(funct:evT) :edictval=
+                (match funct,dict with
+                _,Empty1->Empty1
+                |FunVal(parametro,body,r),Item((k,v),d)-> Item((k,eval body(bind r1 parametro v)),(iterate d r1 funct))
                 )
-  and accuFold (valore :evT)(funct:exp)(dict:(ide*evT) list) (r1:evT env) :evT=
+  and accuFold (valore :evT)(funct:exp)(dict:edictval) (r1:evT env) :evT=
               (match dict with
-              | []->valore
-              | (k,v)::d-> (match(valore,v) with
+              | Empty1->valore
+              | Item((k,v),d)-> (match(valore,v) with
                             | Int(x),Int(y) -> accuFold(eval(MyFunCall(funct,Eint(x),Eint(y))) r1) funct d r1
                             | _ -> failwith("error inside fold")
                             )
@@ -299,7 +309,7 @@ let bool2 = eval d7 env0;;
 
 (*Test su Iterate sul dizionario iniaziale*)
 
-let d8 = Iterate((Fun("x", Sum(Den "x", Eint(1)))), d);;
+let d8 = Iterate((Fun("x",Sum(Den "x",Eint(1)))), d4);;
 
 let diz3 = eval d8 env0;;
 
@@ -311,5 +321,5 @@ let diz4 = eval d9 env0;;
 (*Test su Filter: elimino dal dizionario le coppie chiave-valore che hanno come chiave
 le chiavi presenti nella lista passata come argomento*)
 
-let d10= Filter(["banane"; "pere"], d5);;
+let d10= Filter(["banane"; "kiwi"], d4);;
 let diz5= eval d10 env0;;
