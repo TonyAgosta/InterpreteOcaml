@@ -61,9 +61,9 @@ let typecheck (s : string) (v : evT) : bool = match s with
 	| "bool" -> (match v with
 		| Bool(_) -> true 
 		|_ -> false)
-  (*| "string" -> (match v with
+  | "string" -> (match v with
     | String(_) -> true
-    | _-> false)*)
+    | _-> false)
   | _ -> failwith("not a valid type");;
 
 (*funzioni primitive*)
@@ -265,7 +265,14 @@ let rec eval (e : exp) (r : evT env) : evT = match e with
   and iterate (dict:edictval)(r1: evT env)(funct:evT) :edictval=
                 (match funct,dict with
                 _,Empty1->Empty1
-                |FunVal(parametro,body,r),Item((k,v),d)-> Item((k,eval body(bind r1 parametro v)),(iterate d r1 funct))
+                |FunVal(parametro,body,r),Item((k,v),d)-> 
+                    Item((k,eval body(bind r1 parametro v)),(iterate d r1 funct))
+                |RecFunVal(funzioneric,(parametro,body,r)),Item((k,v),d) -> 
+				        	let aVal = bind r1 funzioneric funct in 
+						        let rEnv = bind aVal parametro v in
+							        let aEnv = eval body rEnv in
+								        Item((k,aEnv),(iterate d r1 funct))
+                |_-> failwith("error iterate")
                 )
   and accuFold (valore :evT)(funct:exp)(dict:edictval) (r1:evT env) :evT=
               (match dict with
@@ -323,3 +330,8 @@ le chiavi presenti nella lista passata come argomento*)
 
 let d10= Filter(["banane"; "kiwi"], d4);;
 let diz5= eval d10 env0;;
+
+(*Test che lancia una eccezione sulla insert*)
+
+let dexcp = Insert("banane",Eint(200),d4);;
+let evalexcp= eval dexcp env0;;
